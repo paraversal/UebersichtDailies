@@ -86,8 +86,46 @@ function normalizeConfig(raw) {
     habits.push({ id, name: obj.name.trim(), color: typeof obj.color === 'string' ? obj.color : null })
   })
 
-  config.habits = habits
+  const hues = assignHues(habits)
+  config.habits = habits.map((h) => ({ ...h, hue: hues[h.id] ?? null }))
   return { config, errors }
+}
+
+// Habits without an explicit `color` get a hue derived from their id, so it is
+// stable across reloads. All habits share one lightness and chroma (set in the
+// widget's CSS), which is what makes any set of hues look like one palette.
+// Hues that land too close together are nudged apart by the golden angle.
+const GOLDEN_ANGLE = 137.508
+
+function hashHue(id) {
+  let h = 2166136261 // FNV-1a
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return (h >>> 0) % 360
+}
+
+const hueDistance = (a, b) => {
+  const d = Math.abs(a - b) % 360
+  return Math.min(d, 360 - d)
+}
+
+// Returns { habitId: hue } for every habit that has no explicit color.
+function assignHues(habits) {
+  const auto = habits.filter((h) => !h.color)
+  const minGap = Math.min(45, 360 / (auto.length * 1.5 || 1))
+  const taken = []
+  const hues = {}
+  for (const habit of auto) {
+    let hue = hashHue(habit.id)
+    for (let tries = 0; tries < 360 && taken.some((t) => hueDistance(t, hue) < minGap); tries++) {
+      hue = (hue + GOLDEN_ANGLE) % 360
+    }
+    taken.push(hue)
+    hues[habit.id] = Math.round(hue)
+  }
+  return hues
 }
 
 const pad = (n) => String(n).padStart(2, '0')
@@ -149,7 +187,7 @@ function replayLog(text) {
   return values
 }
 
-// Output of bin/read.sh: config JSON, a marker line, then the concatenated logs.
+// Output of bin/dailies-read.sh: config JSON, a marker line, then the concatenated logs.
 const LOG_MARKER = '---DAILIES-LOG---'
 function parseReadOutput(output) {
   const text = String(output || '')
@@ -219,6 +257,7 @@ module.exports = {
   WEEK_STARTS,
   slugify,
   normalizeConfig,
+  assignHues,
   dayKey,
   lastNDays,
   weekdayIndex,

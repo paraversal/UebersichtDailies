@@ -14,7 +14,10 @@ test('normalizeConfig fills defaults and slugifies string habits', () => {
   assert.deepEqual(errors, [])
   assert.equal(config.n_col, 14)
   assert.equal(config.location, 'bottom_left')
-  assert.deepEqual(config.habits, [{ id: 'go-to-sleep-on-time', name: 'Go to sleep on time', color: null }])
+  assert.equal(config.habits.length, 1)
+  assert.equal(config.habits[0].id, 'go-to-sleep-on-time')
+  assert.equal(config.habits[0].name, 'Go to sleep on time')
+  assert.equal(config.habits[0].color, null)
 })
 
 test('normalizeConfig reports problems instead of throwing', () => {
@@ -27,6 +30,29 @@ test('normalizeConfig reports problems instead of throwing', () => {
   assert.equal(config.habits.length, 1)
   assert.equal(errors.length, 6)
   assert.ok(core.normalizeConfig(null).errors.length > 0)
+})
+
+test('auto hues are stable per id and kept apart', () => {
+  const names = ['sleep', 'read', 'gym', 'water', 'meditate', 'journal', 'walk', 'stretch']
+  const make = (list) => core.normalizeConfig({ habits: list }).config.habits
+  const habits = make(names)
+  assert.ok(habits.every((h) => Number.isInteger(h.hue) && h.hue >= 0 && h.hue < 360))
+  // same id + same neighbours -> same hue, run after run
+  assert.deepEqual(make(names).map((h) => h.hue), habits.map((h) => h.hue))
+  // a lone habit's hue depends only on its id
+  assert.equal(make(['sleep'])[0].hue, make(['sleep'])[0].hue)
+  const gap = (a, b) => Math.min(Math.abs(a - b), 360 - Math.abs(a - b))
+  const minGap = 360 / (names.length * 1.5)
+  for (let i = 0; i < habits.length; i++)
+    for (let j = i + 1; j < habits.length; j++)
+      assert.ok(gap(habits[i].hue, habits[j].hue) >= minGap - 1, `${names[i]} vs ${names[j]}`)
+})
+
+test('explicit color wins and gets no hue; blanks do not count toward spacing', () => {
+  const [a, b] = core.normalizeConfig({ habits: [{ id: 'a', name: 'a', color: '#fff' }, 'b'] }).config.habits
+  assert.equal(a.hue, null)
+  assert.equal(a.color, '#fff')
+  assert.equal(b.hue, core.assignHues([{ id: 'b', color: null }]).b)
 })
 
 test('dayKey honours day_starts_at', () => {
@@ -95,10 +121,10 @@ test('streak counts consecutive DONE days; skipped bridges, open today does not 
   assert.equal(core.streak({}, 'a', '2026-10-25'), 0)
 })
 
-test('log.sh appends valid events and rejects bad input; read.sh round-trips', () => {
+test('dailies-log.sh appends valid events and rejects bad input; read.sh round-trips', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dailies-test-'))
   const env = { ...process.env, DAILIES_DATA_DIR: dir }
-  const log = (...args) => execFileSync('bash', [path.join(bin, 'log.sh'), ...args], { env, stdio: 'pipe' })
+  const log = (...args) => execFileSync('bash', [path.join(bin, 'dailies-log.sh'), ...args], { env, stdio: 'pipe' })
 
   log('go-to-sleep', '2026-10-25', '1', '1000')
   log('go-to-sleep', '2026-10-25', '2', '2000')
@@ -111,7 +137,7 @@ test('log.sh appends valid events and rejects bad input; read.sh round-trips', (
   assert.match(files[0], /^log-.+\.jsonl$/)
   assert.equal(fs.readFileSync(path.join(dir, files[0]), 'utf8').trim().split('\n').length, 2)
 
-  const out = execFileSync('bash', [path.join(bin, 'read.sh')], { env }).toString()
+  const out = execFileSync('bash', [path.join(bin, 'dailies-read.sh')], { env }).toString()
   const parsed = core.parseReadOutput(out)
   assert.deepEqual(parsed.errors, [])
   assert.equal(parsed.values['go-to-sleep']['2026-10-25'], 2)

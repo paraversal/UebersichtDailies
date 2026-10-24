@@ -23,9 +23,13 @@ Edit `dailies.widget/config.json`; Übersicht reloads the widget when it changes
 | `margin` | `20` | px from the screen edge |
 | `day_starts_at` | `"00:00"` | e.g. `"04:00"` makes 02:30 still count as the previous day |
 | `week_starts` | `"monday"` | `monday` or `sunday`; a small gap is drawn before each new week |
-| `habits` | required | strings, or `{ "id", "name", "color" }` |
+| `habits` | required | strings, or `{ "id", "name", "color" }` (see Colors) |
 
 A habit's `id` (default: its name, lowercased and hyphenated) is the key its history is stored under. If you rename a habit and want to keep its history, give it an explicit `id` equal to the old one.
+
+## Colors
+
+Leave `color` out and each habit gets its own color automatically. The hue comes from the habit's `id`, so it never changes between reloads, while lightness and chroma are shared by all habits (OKLCH), so any set of habits looks like one palette. Hues that land too close together are nudged apart. Set `"color": "#7aa2f7"` (any CSS color) on a habit to override it.
 
 ## Where data lives
 
@@ -44,4 +48,4 @@ The widget replays all `log-*.jsonl` files on load (latest event per habit and d
 node --test test/core.test.js
 ```
 
-Logic lives in `dailies.widget/lib/core.js` (pure, tested); `index.jsx` is rendering only; `bin/log.sh` and `bin/read.sh` are the only code that touches the disk.
+Logic lives in `dailies.widget/lib/core.js` (pure, tested); `index.jsx` is rendering only; `bin/dailies-log.sh` and `bin/dailies-read.sh` are the only code that touches the disk.

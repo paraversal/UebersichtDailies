@@ -1,6 +1,6 @@
 #!/bin/bash
 # Append one tap event to this machine's Dailies log.
-# usage: log.sh <habit-id> <YYYY-MM-DD> <0|1|2> [timestamp-ms]
+# usage: dailies-log.sh <habit-id> <YYYY-MM-DD> <0|1|2> [timestamp-ms]
 #
 # Append-only on purpose: a single short write needs no read-modify-write, so
 # two screens (or a double tap) can never corrupt the file. Habit ids are

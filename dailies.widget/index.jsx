@@ -1,11 +1,14 @@
 import { React, run } from 'uebersicht'
 import core from './lib/core.js'
 
-// Übersicht runs commands with the *widgets root* as cwd, so find our bin/
-// folder whether this repo is symlinked as dailies.widget or cloned in a folder.
-const LOCATE = 's=$(ls -d dailies.widget/bin ./*/dailies.widget/bin 2>/dev/null | head -1)'
+// Übersicht runs commands with the *widgets root* as cwd, so find our bin/ folder
+// by the script's own name. That works whatever the widget folder or symlink is called.
+const LOCATE =
+  'shopt -s nullglob; set -- ./*/bin/dailies-read.sh ./*/*/bin/dailies-read.sh; ' +
+  '[ -n "$1" ] || { echo "dailies: bin/dailies-read.sh not found under the widgets folder" >&2; exit 1; }; ' +
+  's=$(dirname "$1")'
 
-export const command = `${LOCATE}; bash "$s/read.sh"`
+export const command = `${LOCATE}; bash "$s/dailies-read.sh"`
 export const refreshFrequency = 5000 // re-reads the log, so other screens/machines show up
 
 // Full-screen, click-through layer; the card positions itself inside it.
@@ -56,7 +59,6 @@ const WEEKDAY_LETTERS = {
   sunday: ['S', 'M', 'T', 'W', 'T', 'F', 'S'],
 }
 const WEEK_GAP = 8
-const DEFAULT_COLOR = '#5fd0a0'
 const CELL = 26
 
 const anchor = ({ location, margin }) => {
@@ -72,6 +74,8 @@ const css = `
   --skip: rgba(255,255,255,.34);
   --bg: rgba(28,28,32,.55);
   --edge: rgba(255,255,255,.10);
+  --l: .80; /* shared lightness + chroma for auto habit colors */
+  --chroma: .13;
   font: 12px/1.2 -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
   color: var(--fg);
   background: var(--bg);
@@ -94,6 +98,7 @@ const css = `
     --skip: rgba(0,0,0,.28);
     --bg: rgba(255,255,255,.60);
     --edge: rgba(0,0,0,.08);
+    --l: .68;
   }
 }
 .dailies-grid { display: grid; align-items: center; }
@@ -108,6 +113,7 @@ const css = `
 .dailies-cell.week { justify-self: end; }
 .dailies-streak { padding-left: 10px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .dailies-cell {
+  --c: oklch(var(--l) var(--chroma) var(--h, 160));
   all: unset; box-sizing: border-box; width: ${CELL}px; height: ${CELL}px;
   display: grid; place-items: center; cursor: pointer;
 }
@@ -149,7 +155,7 @@ export const render = (state, dispatch) => {
     const value = core.nextValue(core.effectiveValue(values, pending, habit.id, date))
     const t = Date.now()
     dispatch({ type: 'DAILIES/TAP', habit: habit.id, date, value, t })
-    run(`${LOCATE}; bash "$s/log.sh" ${habit.id} ${date} ${value} ${t}`)
+    run(`${LOCATE}; bash "$s/dailies-log.sh" ${habit.id} ${date} ${value} ${t}`)
   }
 
   // A small gap before each new week (not before the first visible column).
@@ -190,7 +196,7 @@ export const render = (state, dispatch) => {
                 <button
                   key={key}
                   className={cls}
-                  style={{ '--c': habit.color || DEFAULT_COLOR }}
+                  style={habit.color ? { '--c': habit.color } : { '--h': habit.hue }}
                   onClick={() => tap(habit, d)}
                   aria-label={`${habit.name}, ${d}`}
                 >
