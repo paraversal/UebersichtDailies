@@ -2,6 +2,7 @@
 // unit-tested with plain node (see test/core.test.js).
 
 const LOCATIONS = ['top_left', 'top_right', 'bottom_left', 'bottom_right']
+const WEEK_STARTS = ['monday', 'sunday']
 const ID_RE = /^[a-z0-9_-]+$/
 const EMPTY = 0
 const DONE = 1
@@ -14,6 +15,7 @@ const DEFAULTS = {
   location: 'bottom_left',
   margin: 20,
   day_starts_at: '00:00',
+  week_starts: 'monday',
 }
 
 function slugify(name) {
@@ -52,6 +54,11 @@ function normalizeConfig(raw) {
     if (typeof src.day_starts_at === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(src.day_starts_at)) {
       config.day_starts_at = src.day_starts_at
     } else errors.push('day_starts_at must look like "04:00"')
+  }
+
+  if ('week_starts' in src) {
+    if (WEEK_STARTS.includes(src.week_starts)) config.week_starts = src.week_starts
+    else errors.push('week_starts must be "monday" or "sunday"')
   }
 
   const habits = []
@@ -108,6 +115,12 @@ function lastNDays(todayKey, n) {
     days.push(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`)
   }
   return days
+}
+
+// 0-6 weekday index of a day key, counted from the configured first day of the week.
+function weekdayIndex(key, weekStarts = 'monday') {
+  const sundayFirst = parseKey(key).getDay()
+  return weekStarts === 'sunday' ? sundayFirst : (sundayFirst + 6) % 7
 }
 
 // Replays JSONL log text into { habitId: { 'YYYY-MM-DD': value } }.
@@ -203,10 +216,12 @@ module.exports = {
   LOG_MARKER,
   DEFAULTS,
   LOCATIONS,
+  WEEK_STARTS,
   slugify,
   normalizeConfig,
   dayKey,
   lastNDays,
+  weekdayIndex,
   replayLog,
   parseReadOutput,
   nextValue,

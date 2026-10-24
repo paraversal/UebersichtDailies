@@ -4,6 +4,7 @@
     "location": "bottom_left",
     "margin": 20,
     "day_starts_at": "00:00",
+    "week_starts": "monday",
     "habits": [
         "go to sleep on time",
         { "id": "read", "name": "read 20 pages", "color": "#7aa2f7" }

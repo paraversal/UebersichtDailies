@@ -35,6 +35,15 @@ test('dayKey honours day_starts_at', () => {
   assert.equal(core.dayKey(late, '04:00'), '2026-10-24')
 })
 
+test('weekdayIndex follows week_starts', () => {
+  // 2026-10-25 is a Sunday
+  assert.equal(core.weekdayIndex('2026-10-25', 'monday'), 6)
+  assert.equal(core.weekdayIndex('2026-10-26', 'monday'), 0)
+  assert.equal(core.weekdayIndex('2026-10-25', 'sunday'), 0)
+  assert.equal(core.normalizeConfig({ habits: ['a'], week_starts: 'friday' }).errors.length, 1)
+  assert.equal(core.normalizeConfig({ habits: ['a'] }).config.week_starts, 'monday')
+})
+
 test('lastNDays is oldest-first and crosses month and DST boundaries', () => {
   assert.deepEqual(core.lastNDays('2026-03-02', 4), ['2026-02-27', '2026-02-28', '2026-03-01', '2026-03-02'])
   const days = core.lastNDays('2026-11-02', 5) // US DST ends 2026-11-01

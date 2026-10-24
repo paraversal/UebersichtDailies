@@ -50,7 +50,12 @@ export const updateState = (event, prev) => {
   }
 }
 
-const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+// Indexed by core.weekdayIndex, so the letters follow config.week_starts.
+const WEEKDAY_LETTERS = {
+  monday: ['M', 'T', 'W', 'T', 'F', 'S', 'S'],
+  sunday: ['S', 'M', 'T', 'W', 'T', 'F', 'S'],
+}
+const WEEK_GAP = 8
 const DEFAULT_COLOR = '#5fd0a0'
 const CELL = 26
 
@@ -71,6 +76,7 @@ const css = `
   color: var(--fg);
   background: var(--bg);
   border: 1px solid var(--edge);
+  margin-bottom: 15px;
   border-radius: 18px;
   padding: 14px 16px;
   backdrop-filter: blur(28px) saturate(160%);
@@ -98,6 +104,8 @@ const css = `
 .dailies-head { text-align: center; color: var(--muted); font-size: 10px; line-height: 1.25; padding-bottom: 4px; }
 .dailies-head b { display: block; font-weight: 600; font-size: 11px; }
 .dailies-head.today { color: var(--fg); }
+.dailies-head.week { padding-left: ${WEEK_GAP}px; }
+.dailies-cell.week { justify-self: end; }
 .dailies-streak { padding-left: 10px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .dailies-cell {
   all: unset; box-sizing: border-box; width: ${CELL}px; height: ${CELL}px;
@@ -144,8 +152,10 @@ export const render = (state, dispatch) => {
     run(`${LOCATE}; bash "$s/log.sh" ${habit.id} ${date} ${value} ${t}`)
   }
 
+  // A small gap before each new week (not before the first visible column).
+  const weekStart = (d, i) => i > 0 && core.weekdayIndex(d, config.week_starts) === 0
   const grid = {
-    gridTemplateColumns: `auto repeat(${days.length}, ${CELL}px) auto`,
+    gridTemplateColumns: `auto ${days.map((d, i) => (weekStart(d, i) ? CELL + WEEK_GAP : CELL) + 'px').join(' ')} auto`,
   }
 
   return (
@@ -160,11 +170,11 @@ export const render = (state, dispatch) => {
       {config.habits.length > 0 && (
         <div className="dailies-grid" style={grid}>
           <div />
-          {days.map((d) => {
+          {days.map((d, i) => {
             const dt = new Date(d + 'T12:00:00')
             return (
-              <div key={d} className={'dailies-head' + (d === today ? ' today' : '')}>
-                {WEEKDAYS[dt.getDay()]}
+              <div key={d} className={'dailies-head' + (d === today ? ' today' : '') + (weekStart(d, i) ? ' week' : '')}>
+                {WEEKDAY_LETTERS[config.week_starts][core.weekdayIndex(d, config.week_starts)]}
                 <b>{dt.getDate()}</b>
               </div>
             )
@@ -172,10 +182,10 @@ export const render = (state, dispatch) => {
           <div />
           {config.habits.map((habit) => [
             <div key={habit.id + ':label'} className="dailies-label" title={habit.name}>{habit.name}</div>,
-            ...days.map((d) => {
+            ...days.map((d, i) => {
               const v = core.effectiveValue(values, pending, habit.id, d)
               const key = core.cellKey(habit.id, d)
-              const cls = `dailies-cell s${v}` + (config.show_success_animation && pop === key ? ' pop' : '')
+              const cls = `dailies-cell s${v}` + (config.show_success_animation && pop === key ? ' pop' : '') + (weekStart(d, i) ? ' week' : '')
               return (
                 <button
                   key={key}

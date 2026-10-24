@@ -22,6 +22,7 @@ Edit `dailies.widget/config.json`; Übersicht reloads the widget when it changes
 | `location` | `"bottom_left"` | `top_left`, `top_right`, `bottom_left`, `bottom_right` |
 | `margin` | `20` | px from the screen edge |
 | `day_starts_at` | `"00:00"` | e.g. `"04:00"` makes 02:30 still count as the previous day |
+| `week_starts` | `"monday"` | `monday` or `sunday`; a small gap is drawn before each new week |
 | `habits` | required | strings, or `{ "id", "name", "color" }` |
 
 A habit's `id` (default: its name, lowercased and hyphenated) is the key its history is stored under. If you rename a habit and want to keep its history, give it an explicit `id` equal to the old one.
