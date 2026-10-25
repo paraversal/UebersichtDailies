@@ -112,7 +112,7 @@ Add calendars as subscription links. Each one becomes a row between the dates an
 ]
 ```
 
-A calendar can also be just the link; its own title is then used as the row label. `https://` links work as well, so Google, Fastmail and any other `.ics` feed are fine.
+A calendar can also be just the link; its own title is then used as the row label. Each calendar has an `id` (by default taken from its `name`, or derived from the link when there is none); completion marks are stored under it, so set an explicit `"id"` if you expect to rename a calendar. `https://` links work as well, so Google, Fastmail and any other `.ics` feed are fine.
 
 > **Treat the link like a password.** Anyone who has an iCloud public-calendar link can read that calendar. Keep it in `config.json` (which git ignores), and untick *Public Calendar* in Apple Calendar to revoke it. The widget only ever contacts that one address, and error messages never print it.
 
@@ -122,8 +122,12 @@ A calendar can also be just the link; its own title is then used as the row labe
 - **Hover** a dot to see that day's events: the title, with the start time in front when it has one. A small number on the dot shows the count when there are several (switch it off with `show_event_count`).
 - **Today's events** are always shown in a small speech bubble above the card (below it for `top_*` locations), pointing at today's column. It steps aside while you hover another dot.
 - Set `n_future` to see what is coming up, for example `7` for the next week.
+- **Completing events:** events aren't tasks, but you can still mark one as done. In any tooltip or in today's bubble, each event has a small checkbox ring: click the event to tick it (click again to reopen it). A completed event is struck through, and when every event on a day is done, the dot turns into a tick. Clicking the day's dot itself is a shortcut: it completes everything still open that day, and reopens them all if they were already done.
+- **Today's bubble only shows what is still open.** Completing the last event of the day closes it; it comes back if you reopen an event. A day with several events counts only the open ones in its number.
 - **Refresh now:** hover the card and a small refresh button appears in its top-left corner. Click it to re-download every calendar immediately instead of waiting for the next scheduled refresh; it spins until the feeds are updated. It only exists when you have calendars configured.
 - Colors work like habit colors: automatic and harmonious, or an explicit `"color"`.
+
+**Completion marks are kept per occurrence.** Each occurrence of a recurring event is completed on its own (today's standup, not every standup). A one-off event keeps its mark if you reschedule it in Calendar, and a single moved occurrence keeps the mark of the slot it replaced. Marks are stored in your log (see below), never in the calendar itself.
 
 **Fetching and caching.** Feeds are downloaded with `curl` in the background and cached in `~/Library/Application Support/Dailies/cache/`, by default every 30 minutes. A failed download keeps the last good copy, is retried at most every 5 minutes (the refresh button ignores that wait), and shows a short note on the card. Your events never leave your machine except through the link you subscribed to.
 
@@ -141,7 +145,7 @@ Every tap is appended as one JSON line to:
 {"t":1761350000000,"h":"go-to-sleep-on-time","d":"2026-10-25","v":1}
 ```
 
-`t` is a timestamp in milliseconds, `h` the habit id, `d` the day, and `v` the state (`0` empty, `1` done, `2` skipped). The widget replays the log on load, and the latest event for each habit and day wins. It re-reads the log every 5 seconds, so several screens stay in sync, and a tap appears instantly before the write finishes.
+`t` is a timestamp in milliseconds, `h` the habit id, `d` the day, and `v` the state (`0` empty, `1` done, `2` skipped). Completed calendar events use the same file with a different shape, `{"t":…,"cal":"work","e":"00aabbccddeeff","v":1}`, where `cal` is the calendar's id and `e` identifies the event occurrence. The widget replays the log on load, and the latest event for each habit and day wins. It re-reads the log every 5 seconds, so several screens stay in sync, and a tap appears instantly before the write finishes.
 
 Why it is built this way:
 
@@ -166,6 +170,7 @@ Downloaded calendar feeds live next to it in `Dailies/cache/` (`cal-<id>.ics`). 
 | `dailies-read.sh not found` on the card | The widget folder isn't inside Übersicht's widgets folder, or the link is broken. |
 | A red message on the card | A config problem. The message says which key to fix. |
 | A habit lost its history | Its `id` changed, usually through a rename. Set `id` back (see above). |
+| A completed event shows as open again | Its calendar was re-added under a different id (a renamed calendar `name` changes the default id). Set an explicit `"id"` on the calendar to keep marks. |
 | A calendar row stays empty | Check the card for a red `calendar "…"` message. If there is none, the feed may simply have no events in the visible days. Try opening the link in a browser: it should download an `.ics` file. |
 | `calendar "…": … 404` or `403` | The link was revoked or mistyped. Copy it again from Apple Calendar. |
 | Events at the wrong time | The feed uses a time zone name that isn't an IANA name (such as a Windows one). Such times are read as your local time. |
@@ -186,6 +191,7 @@ dailies.widget/
   lib/ics.js             pure logic: iCalendar parsing and recurrence expansion
   lib/calendar-sync.js   background loop that keeps the calendar cache fresh
   bin/dailies-log.sh     appends one tap event to the log
+  bin/dailies-complete.sh  appends a "calendar event completed" mark
   bin/dailies-read.sh    prints the config and all logs
   bin/dailies-fetch.sh   downloads one calendar feed into the cache
   bin/dailies-calendars.sh  prints the cached feeds

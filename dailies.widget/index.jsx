@@ -54,15 +54,19 @@ export const initialState = {
   calendarData: {},
   calendarVersion: 0,
   refreshing: false,
+  completions: {},
+  pendingDone: {},
 }
 
 export const updateState = (event, prev) => {
   switch (event.type) {
     case 'UB/COMMAND_RAN': {
       if (event.error) return { ...prev, fetchError: String(event.error) }
-      const { config, errors, values } = core.parseReadOutput(event.output)
-      const pending = core.prunePending(prev.pending, values, Date.now())
-      return { ...prev, config, errors, values, pending, loaded: true, fetchError: null }
+      const { config, errors, values, completions } = core.parseReadOutput(event.output)
+      const now = Date.now()
+      const pending = core.prunePending(prev.pending, values, now)
+      const pendingDone = core.prunePendingDone(prev.pendingDone, completions, now)
+      return { ...prev, config, errors, values, pending, completions, pendingDone, loaded: true, fetchError: null }
     }
     case 'DAILIES/TAP': {
       const key = core.cellKey(event.habit, event.date)
@@ -74,6 +78,10 @@ export const updateState = (event, prev) => {
     }
     case 'DAILIES/CALENDARS':
       return { ...prev, calendarData: ics.parseCalendarOutput(event.output), calendarVersion: prev.calendarVersion + 1 }
+    case 'DAILIES/DONE': {
+      const key = core.doneKey(event.cal, event.id)
+      return { ...prev, pendingDone: { ...prev.pendingDone, [key]: { value: event.value, t: event.t } } }
+    }
     case 'DAILIES/REFRESHING':
       return { ...prev, refreshing: event.busy }
     default:
@@ -205,7 +213,11 @@ const css = `
 }
 .dailies-cal-cell:hover { z-index: 20; }
 .dailies-evdot { width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
-.dailies-cal-cell.past .dailies-evdot { opacity: .5; }
+.dailies-evcheck { display: grid; place-items: center; color: var(--c); }
+.dailies-cal-cell.past .dailies-evdot, .dailies-cal-cell.past .dailies-evcheck { opacity: .5; }
+.dailies-cal-cell.has-events { cursor: pointer; }
+.dailies-cal-cell.has-events:hover .dailies-evdot { transform: scale(1.25); }
+.dailies-evdot { transition: transform .15s ease; }
 .dailies-count {
   position: absolute; top: 1px; right: 2px;
   font-size: 8px; font-weight: 600; line-height: 1; color: var(--muted);
@@ -219,17 +231,32 @@ const css = `
   background: var(--tip-bg); border: 1px solid var(--edge);
   backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
   box-shadow: 0 6px 20px rgba(0,0,0,.28);
-  pointer-events: none; text-align: left;
+  text-align: left;
 }
+.dailies-tip { pointer-events: none; }
+.dailies-bubble { pointer-events: auto; }
 .dailies-tip { z-index: 30; opacity: 0; transition: opacity .12s ease; }
-.dailies-cal-cell:hover .dailies-tip { opacity: 1; }
+.dailies-cal-cell:hover .dailies-tip { opacity: 1; pointer-events: auto; }
+/* a bridge over the 2px gap, so the pointer can travel from the dot into the tooltip */
+.dailies-tip::before { content: ''; position: absolute; left: 0; right: 0; height: 6px; }
+.dailies-tip.up::before { top: 100%; }
+.dailies-tip.down::before { bottom: 100%; }
 .dailies-tip.up { bottom: calc(100% + 2px); }
 .dailies-tip.down { top: calc(100% + 2px); }
 .dailies-tip.l, .dailies-bubble.l { left: 0; }
 .dailies-tip.r, .dailies-bubble.r { right: 0; }
-.dailies-line { display: flex; gap: 6px; align-items: baseline; }
-.dailies-line + .dailies-line { margin-top: 3px; }
-.dailies-line i { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--c); transform: translateY(-1px); }
+.dailies-line { display: flex; gap: 7px; align-items: baseline; cursor: pointer; border-radius: 6px; margin: 0 -4px; padding: 1px 4px; }
+.dailies-line + .dailies-line { margin-top: 2px; }
+.dailies-line:hover { background: var(--empty); }
+/* an empty ring, like a checkbox; filled with a tick once the event is completed */
+.dailies-line i {
+  flex: none; box-sizing: border-box; width: 11px; height: 11px; border-radius: 50%;
+  border: 1.5px solid var(--c); display: grid; place-items: center; color: var(--tip-bg);
+  transform: translateY(1px); transition: background-color .2s ease;
+}
+.dailies-line.done i { background: var(--c); }
+.dailies-line.done span { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--muted); }
+.dailies-line.done em { opacity: .7; }
 .dailies-line em { font-style: normal; color: var(--muted); font-variant-numeric: tabular-nums; }
 .dailies-line span { overflow-wrap: anywhere; }
 
@@ -245,7 +272,7 @@ const css = `
 .dailies-bubble.down::after { top: -5px; border-bottom: 0; border-right: 0; }
 .dailies-bubble.l::after { left: 9px; }
 .dailies-bubble.r::after { right: 9px; }
-.dailies-grid:has(.dailies-cal-cell:hover) .dailies-bubble { opacity: 0; transition: opacity .1s; }
+.dailies-grid:has(.dailies-cal-cell:hover) .dailies-bubble { opacity: 0; pointer-events: none; transition: opacity .1s; }
 .dailies-more { color: var(--muted); margin-top: 3px; }
 
 @keyframes dailies-pop { 0% { transform: scale(.6); } 60% { transform: scale(1.35); } 100% { transform: scale(1); } }
@@ -263,10 +290,16 @@ const css = `
 .dailies-errors.beside-refresh { padding-left: 14px; }
 `
 
+const Check = ({ size, width }) => (
+  <svg viewBox="0 0 10 10" width={size} height={size} fill="none" stroke="currentColor" strokeWidth={width} strokeLinecap="round" strokeLinejoin="round">
+    <path d="M1.8 5.4l2.2 2.2L8.3 2.6" />
+  </svg>
+)
+
 const colorStyle = (item) => (item.color ? { '--c': item.color } : { '--h': item.hue })
 
 export const render = (state, dispatch) => {
-  const { config, errors, values, pending, pop, loaded, fetchError, calendarData, refreshing } = state
+  const { config, errors, values, pending, pop, loaded, fetchError, calendarData, refreshing, completions, pendingDone } = state
   const now = new Date()
   const today = core.dayKey(now, config.day_starts_at)
   const days = core.dayRange(today, config.n_col, config.n_future)
@@ -298,20 +331,49 @@ export const render = (state, dispatch) => {
   const calLabel = (c) => c.name || (calendarData[c.id] && calendarData[c.id].name) || ''
   const rowCount = 1 + config.calendars.length + (config.calendars.length ? 1 : 0) + config.habits.length
 
-  const todaysEvents = config.calendars
-    .map((c) => ({ c, items: (calEvents[c.id] && calEvents[c.id][today]) || [] }))
-    .filter((g) => g.items.length)
-  const bubbleLines = todaysEvents.flatMap(({ c, items }) => items.map((e) => ({ c, e })))
+  const isDone = (c, e) => core.effectiveDone(completions, pendingDone, c.id, e.id) === 1
 
-  const eventLine = (c, e, key) => (
-    <div className="dailies-line" key={key} style={colorStyle(c)}>
-      <i />
-      <span>
-        {e.time && <em>{e.time} </em>}
-        {e.title}
-      </span>
-    </div>
+  // Mark events completed (or open again). Same optimistic-then-log flow as habit taps.
+  const setDone = (c, changes) => {
+    if (!changes.length) return
+    const t = Date.now()
+    changes.forEach(({ e, value }) => dispatch({ type: 'DAILIES/DONE', cal: c.id, id: e.id, value, t }))
+    run(`${LOCATE}; ` + changes.map(({ e, value }) => `bash "$s/dailies-complete.sh" ${c.id} ${e.id} ${value} ${t}`).join('; '))
+  }
+  const toggleOne = (c, e) => setDone(c, [{ e, value: isDone(c, e) ? 0 : 1 }])
+  // Clicking a day's dot completes everything still open that day; once all are done, it reopens them.
+  const toggleDay = (c, events) => {
+    const open = events.filter((e) => !isDone(c, e))
+    setDone(c, open.length ? open.map((e) => ({ e, value: 1 })) : events.map((e) => ({ e, value: 0 })))
+  }
+
+  // Today's bubble only lists what is still open, so completing the last event closes it.
+  const bubbleLines = config.calendars.flatMap((c) =>
+    ((calEvents[c.id] && calEvents[c.id][today]) || []).filter((e) => !isDone(c, e)).map((e) => ({ c, e })),
   )
+
+  const eventLine = (c, e, key) => {
+    const done = isDone(c, e)
+    return (
+      <div
+        className={'dailies-line' + (done ? ' done' : '')}
+        key={key}
+        style={colorStyle(c)}
+        role="button"
+        aria-label={`${done ? 'Reopen' : 'Complete'}: ${e.title}`}
+        onClick={(ev) => {
+          ev.stopPropagation()
+          toggleOne(c, e)
+        }}
+      >
+        <i>{done && <Check size={7} width={2} />}</i>
+        <span>
+          {e.time && <em>{e.time} </em>}
+          {e.title}
+        </span>
+      </div>
+    )
+  }
 
   return (
     <div className="dailies-card" style={anchor(config)}>
@@ -353,13 +415,18 @@ export const render = (state, dispatch) => {
             <div key={c.id + ':label'} className="dailies-label cal" title={calLabel(c)}>{calLabel(c)}</div>,
             ...days.map((d, i) => {
               const events = (calEvents[c.id] && calEvents[c.id][d]) || []
-              const cls = 'dailies-cal-cell' + (d < today ? ' past' : '') + (weekStart(d, i) ? ' week' : '')
+              const open = events.filter((e) => !isDone(c, e))
+              const cls =
+                'dailies-cal-cell' +
+                (d < today ? ' past' : '') +
+                (weekStart(d, i) ? ' week' : '') +
+                (events.length ? ' has-events' : '')
               return (
-                <div key={c.id + ':' + d} className={cls} style={colorStyle(c)}>
+                <div key={c.id + ':' + d} className={cls} style={colorStyle(c)} onClick={() => events.length && toggleDay(c, events)}>
                   {events.length > 0 && [
-                    <span key="dot" className="dailies-evdot" />,
-                    config.show_event_count && events.length > 1 && (
-                      <span key="count" className="dailies-count">{events.length}</span>
+                    open.length ? <span key="dot" className="dailies-evdot" /> : <span key="dot" className="dailies-evcheck"><Check size={10} width={2.2} /></span>,
+                    config.show_event_count && open.length > 1 && (
+                      <span key="count" className="dailies-count">{open.length}</span>
                     ),
                     <div key="tip" className={`dailies-tip ${vertical} ${side(i)}`}>
                       {events.map((e, k) => eventLine(c, e, k))}

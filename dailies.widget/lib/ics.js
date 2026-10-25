@@ -369,14 +369,39 @@ function occurrenceDays(ev, fromDn, toDn) {
 
 const sameInstantOrDate = (a, b) => (a.allDay ? a.date === b.date : instantOf(a) === instantOf(b))
 
-// Expand events into { 'YYYY-MM-DD': [{ title, allDay, startMs, endMs, time }] }
+// 53-bit string hash (cyrb53) as 14 hex digits: a short, shell-safe event id.
+function hashKey(str) {
+  let h1 = 0xdeadbeef
+  let h2 = 0x41c6ce57
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i)
+    h1 = Math.imul(h1 ^ ch, 2654435761)
+    h2 = Math.imul(h2 ^ ch, 1597334677)
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909)
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909)
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16).padStart(14, '0')
+}
+
+const wallStamp = (w) => `${w.date}T${pad(w.h)}${pad(w.mi)}`
+
+// Identifies one occurrence so it can be marked completed. A one-off event keeps
+// its id when rescheduled; every occurrence of a recurring event gets its own
+// (moved instances keep the id of the slot they replace).
+function eventId(ev, w) {
+  const base = ev.uid || `${ev.title}@${wallStamp(ev.start)}`
+  if (!ev.rrule && !ev.recurrenceId) return hashKey(base)
+  return hashKey(`${base}|${wallStamp(ev.recurrenceId || w)}`)
+}
+
+// Expand events into { 'YYYY-MM-DD': [{ id, title, allDay, startMs, endMs, time }] }
 // for every local day from startKey to endKey inclusive.
 function expandEvents(events, startKey, endKey) {
   const fromDn = dayNum(startKey)
   const toDn = dayNum(endKey)
   const out = {}
 
-  const emit = (title, allDay, startMs, endMs, firstDn, lastDn) => {
+  const emit = (id, title, allDay, startMs, endMs, firstDn, lastDn) => {
     for (let dn = Math.max(firstDn, fromDn); dn <= Math.min(lastDn, toDn); dn++) {
       const key = keyOf(dn)
       const isStart = dn === firstDn
@@ -384,7 +409,7 @@ function expandEvents(events, startKey, endKey) {
         allDay || !isStart
           ? null
           : timeFormat.format(startMs)
-      ;(out[key] || (out[key] = [])).push({ title, allDay, startMs, endMs, time })
+      ;(out[key] || (out[key] = [])).push({ id, title, allDay, startMs, endMs, time })
     }
   }
 
@@ -412,13 +437,13 @@ function expandEvents(events, startKey, endKey) {
         }
       }
       if (base.allDay) {
-        emit(ev.title, true, null, null, dn, dn + ev.durDays - 1)
+        emit(eventId(ev, w), ev.title, true, null, null, dn, dn + ev.durDays - 1)
       } else {
         const startMs = instantOf(w)
         const endMs = startMs + ev.durMs
         const firstDn = dayNum(localKey(startMs))
         const lastDn = endMs > startMs ? dayNum(localKey(endMs - 1)) : firstDn
-        emit(ev.title, false, startMs, endMs, firstDn, lastDn)
+        emit(eventId(ev, w), ev.title, false, startMs, endMs, firstDn, lastDn)
       }
     }
   }
@@ -429,4 +454,4 @@ function expandEvents(events, startKey, endKey) {
   return out
 }
 
-module.exports = { parseIcs, parseCalendarOutput, expandEvents, wallToInstant }
+module.exports = { parseIcs, parseCalendarOutput, expandEvents, wallToInstant, hashKey }

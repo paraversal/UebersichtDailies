@@ -266,6 +266,47 @@ function replayLog(text) {
   return values
 }
 
+// Calendar event completions live in the same log as habit taps:
+// { t, cal, e (event id), v: 0|1 }. Returns { 'cal|eventId': 0|1 }, latest wins.
+function replayCompletions(text) {
+  const events = []
+  String(text || '')
+    .split('\n')
+    .forEach((line, order) => {
+      if (!line.trim()) return
+      try {
+        const e = JSON.parse(line)
+        if (typeof e.cal === 'string' && /^[0-9a-f]{8,32}$/.test(e.e) && (e.v === 0 || e.v === 1)) {
+          events.push({ k: e.cal + '|' + e.e, v: e.v, t: Number(e.t) || 0, order })
+        }
+      } catch (_) {
+        /* ignore partial or corrupt line */
+      }
+    })
+  events.sort((a, b) => a.t - b.t || a.order - b.order)
+  const done = {}
+  for (const e of events) done[e.k] = e.v
+  return done
+}
+
+const doneKey = (calId, eventId) => `${calId}|${eventId}`
+
+// Like effectiveValue/prunePending for habits: an unconfirmed local click wins
+// until the log catches up (or 15s pass).
+function effectiveDone(completions, pendingDone, calId, eventId) {
+  const k = doneKey(calId, eventId)
+  const p = pendingDone[k]
+  return p ? p.value : completions[k] || 0
+}
+
+function prunePendingDone(pendingDone, completions, now) {
+  const kept = {}
+  for (const [k, p] of Object.entries(pendingDone)) {
+    if ((completions[k] || 0) !== p.value && now - p.t < PENDING_TTL_MS) kept[k] = p
+  }
+  return kept
+}
+
 // Output of bin/dailies-read.sh: config JSON, a marker line, then the concatenated logs.
 const LOG_MARKER = '---DAILIES-LOG---'
 function parseReadOutput(output) {
@@ -282,7 +323,7 @@ function parseReadOutput(output) {
   }
   const { config, errors } = normalizeConfig(raw)
   if (parseError) errors.unshift(parseError)
-  return { config, errors, values: replayLog(logText) }
+  return { config, errors, values: replayLog(logText), completions: replayCompletions(logText) }
 }
 
 function nextValue(v) {
@@ -343,6 +384,10 @@ module.exports = {
   dayRange,
   weekdayIndex,
   replayLog,
+  replayCompletions,
+  doneKey,
+  effectiveDone,
+  prunePendingDone,
   parseReadOutput,
   nextValue,
   cellKey,

@@ -196,3 +196,49 @@ test('parseCalendarOutput splits per calendar and surfaces fetch errors', () => 
   assert.equal(r.nocache.events.length, 0)
   assert.deepEqual(ics.parseCalendarOutput(''), {})
 })
+
+test('event ids: one per occurrence, stable across windows, shared by every day of a multi-day event', () => {
+  const text = wrap(
+    vevent('UID:daily', 'DTSTART;TZID=Europe/Berlin:20261019T090000', 'DTEND;TZID=Europe/Berlin:20261019T100000', 'RRULE:FREQ=DAILY', 'SUMMARY:Standup'),
+    vevent('UID:trip', 'DTSTART;VALUE=DATE:20261020', 'DTEND;VALUE=DATE:20261023', 'SUMMARY:Trip'),
+  )
+  const a = expand(text, '2026-10-19', '2026-10-24')
+  const standup = ['2026-10-19', '2026-10-20', '2026-10-21'].map((d) => a[d].find((e) => e.title === 'Standup').id)
+  assert.equal(new Set(standup).size, 3, 'each occurrence gets its own id')
+  standup.forEach((id) => assert.match(id, /^[0-9a-f]{14}$/))
+
+  // a different window yields the same ids for the same occurrences
+  const b = expand(text, '2026-10-20', '2026-10-30')
+  assert.equal(b['2026-10-20'].find((e) => e.title === 'Standup').id, standup[1])
+
+  const tripIds = ['2026-10-20', '2026-10-21', '2026-10-22'].map((d) => a[d].find((e) => e.title === 'Trip').id)
+  assert.equal(new Set(tripIds).size, 1, 'a multi-day event is one event')
+})
+
+test('event ids: a one-off event keeps its id when rescheduled; a moved instance keeps its slot id', () => {
+  const before = wrap(vevent('UID:one', 'DTSTART;TZID=Europe/Berlin:20261025T100000', 'DTEND;TZID=Europe/Berlin:20261025T110000', 'SUMMARY:Dentist'))
+  const after = wrap(vevent('UID:one', 'DTSTART;TZID=Europe/Berlin:20261027T150000', 'DTEND;TZID=Europe/Berlin:20261027T160000', 'SUMMARY:Dentist'))
+  const idBefore = expand(before, '2026-10-25', '2026-10-25')['2026-10-25'][0].id
+  const idAfter = expand(after, '2026-10-27', '2026-10-27')['2026-10-27'][0].id
+  assert.equal(idBefore, idAfter)
+
+  const series = (...extra) =>
+    wrap(vevent('UID:S', 'DTSTART;TZID=Europe/Berlin:20261019T090000', 'DTEND;TZID=Europe/Berlin:20261019T100000', 'RRULE:FREQ=DAILY;COUNT=3', 'SUMMARY:Sync'), ...extra)
+  const plain = expand(series(), '2026-10-18', '2026-10-30')
+  const moved = expand(
+    series(vevent('UID:S', 'RECURRENCE-ID;TZID=Europe/Berlin:20261020T090000', 'DTSTART;TZID=Europe/Berlin:20261022T150000', 'DTEND;TZID=Europe/Berlin:20261022T160000', 'SUMMARY:Sync (moved)')),
+    '2026-10-18',
+    '2026-10-30',
+  )
+  assert.equal(moved['2026-10-22'][0].id, plain['2026-10-20'][0].id, 'the moved instance replaces the slot and its id')
+})
+
+test('event ids: events without a UID are told apart by title and start', () => {
+  const text = wrap(
+    vevent('DTSTART;VALUE=DATE:20261025', 'SUMMARY:Lunch'),
+    vevent('DTSTART;VALUE=DATE:20261025', 'SUMMARY:Dinner'),
+  )
+  const items = expand(text, '2026-10-25', '2026-10-25')['2026-10-25']
+  assert.equal(items.length, 2)
+  assert.notEqual(items[0].id, items[1].id)
+})
