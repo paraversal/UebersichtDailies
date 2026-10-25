@@ -125,3 +125,37 @@ test('fetch rejects bad ids, ages and urls without touching the network', async 
   }
   fs.rmSync(dir, { recursive: true })
 })
+
+test('force re-downloads a fresh cache and ignores the failure back-off; junk options are rejected', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dailies-fetch-'))
+  const env = { ...process.env, DAILIES_DATA_DIR: dir }
+  let status = 200
+  await withServer(
+    (req, res) => {
+      res.statusCode = status
+      res.end(status === 200 ? FEED : 'nope')
+    },
+    async (base, hits) => {
+      const feed = base + '/f.ics\n'
+      await sh('dailies-fetch.sh', ['c', '30'], { env, input: feed })
+      await sh('dailies-fetch.sh', ['c', '30'], { env, input: feed })
+      assert.equal(hits.length, 1, 'normal call stays cached')
+      await sh('dailies-fetch.sh', ['c', '30', 'force'], { env, input: feed })
+      assert.equal(hits.length, 2, 'force downloads although the cache is fresh')
+
+      status = 500
+      await sh('dailies-fetch.sh', ['c', '30', 'force'], { env, input: feed }) // fails, sets the back-off
+      assert.equal(hits.length, 3)
+      await sh('dailies-fetch.sh', ['c', '30'], { env, input: feed })
+      assert.equal(hits.length, 3, 'normal call backs off after the failure')
+      status = 200
+      await sh('dailies-fetch.sh', ['c', '30', 'force'], { env, input: feed })
+      assert.equal(hits.length, 4, 'force retries immediately')
+      assert.ok(!fs.existsSync(path.join(dir, 'cache', 'cal-c.err')), 'a successful download clears the error')
+
+      const bad = await sh('dailies-fetch.sh', ['c', '30', 'sudo'], { env, input: feed })
+      assert.notEqual(bad.code, 0)
+    },
+  )
+  fs.rmSync(dir, { recursive: true })
+})

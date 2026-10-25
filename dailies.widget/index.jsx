@@ -25,12 +25,12 @@ export const className = `
 // Calendar feeds are downloaded and cached outside the 5s poll (see lib/calendar-sync.js).
 // The config is read once here; editing it reloads the widget, which runs init again.
 export const init = (dispatch) => {
-  if (window.__dailiesStopSync) window.__dailiesStopSync()
+  if (window.__dailiesSync) window.__dailiesSync.stop()
   run(command)
     .then((output) => {
       const { config } = core.parseReadOutput(output)
       if (!config.calendars.length) return
-      window.__dailiesStopSync = sync.startCalendarSync({
+      window.__dailiesSync = sync.startCalendarSync({
         run,
         dispatch,
         locate: LOCATE,
@@ -53,6 +53,7 @@ export const initialState = {
   fetchError: null,
   calendarData: {},
   calendarVersion: 0,
+  refreshing: false,
 }
 
 export const updateState = (event, prev) => {
@@ -73,6 +74,8 @@ export const updateState = (event, prev) => {
     }
     case 'DAILIES/CALENDARS':
       return { ...prev, calendarData: ics.parseCalendarOutput(event.output), calendarVersion: prev.calendarVersion + 1 }
+    case 'DAILIES/REFRESHING':
+      return { ...prev, refreshing: event.busy }
     default:
       return prev
   }
@@ -182,6 +185,19 @@ const css = `
 .dailies-cell.future { cursor: default; pointer-events: none; }
 .dailies-cell.future .dailies-dot { opacity: .45; transform: scale(.8); }
 
+/* refresh button: only there while the card is hovered (or while refreshing) */
+.dailies-refresh {
+  all: unset; box-sizing: border-box; position: absolute; top: 5px; left: 6px;
+  width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center;
+  color: var(--muted); cursor: pointer; opacity: 0;
+  transition: opacity .2s ease, background-color .15s ease, color .15s ease;
+}
+.dailies-card:hover .dailies-refresh { opacity: 1; }
+.dailies-refresh:hover { background: var(--empty); color: var(--fg); }
+.dailies-refresh:active svg { transform: scale(.88); }
+.dailies-refresh.busy { opacity: 1; cursor: default; }
+.dailies-refresh.busy svg { animation: dailies-spin .8s linear infinite; }
+
 /* calendar rows: a smaller dot than the habit dots, so the two kinds never look alike */
 .dailies-cal-cell {
   position: relative; box-sizing: border-box; width: ${CELL}px; height: ${CELL}px;
@@ -234,19 +250,23 @@ const css = `
 
 @keyframes dailies-pop { 0% { transform: scale(.6); } 60% { transform: scale(1.35); } 100% { transform: scale(1); } }
 @keyframes dailies-ring { from { transform: scale(1); opacity: .8; } to { transform: scale(2.4); opacity: 0; } }
+@keyframes dailies-spin { to { transform: rotate(360deg); } }
 @keyframes dailies-fade { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) {
   .dailies-dot, .dailies-tip { transition: none; }
   .dailies-cell.s1.pop .dailies-dot, .dailies-cell.s1.pop::after, .dailies-bubble { animation: none; }
+  .dailies-refresh.busy svg { animation: none; }
+  .dailies-refresh.busy { color: var(--fg); }
 }
 .dailies-errors { color: #ff8a80; font-size: 11px; max-width: 320px; margin-bottom: 8px; }
 .dailies-errors div + div { margin-top: 3px; }
+.dailies-errors.beside-refresh { padding-left: 14px; }
 `
 
 const colorStyle = (item) => (item.color ? { '--c': item.color } : { '--h': item.hue })
 
 export const render = (state, dispatch) => {
-  const { config, errors, values, pending, pop, loaded, fetchError, calendarData } = state
+  const { config, errors, values, pending, pop, loaded, fetchError, calendarData, refreshing } = state
   const now = new Date()
   const today = core.dayKey(now, config.day_starts_at)
   const days = core.dayRange(today, config.n_col, config.n_future)
@@ -296,8 +316,21 @@ export const render = (state, dispatch) => {
   return (
     <div className="dailies-card" style={anchor(config)}>
       <style>{css}</style>
+      {config.calendars.length > 0 && (
+        <button
+          className={'dailies-refresh' + (refreshing ? ' busy' : '')}
+          title="Refresh calendars"
+          aria-label="Refresh calendars"
+          onClick={() => window.__dailiesSync && window.__dailiesSync.refresh()}
+        >
+          <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M13.2 8A5.2 5.2 0 1 1 11.7 4.3" />
+            <path d="M13.4 2.2v3.3H10.1" />
+          </svg>
+        </button>
+      )}
       {messages.length > 0 && (
-        <div className="dailies-errors">
+        <div className={'dailies-errors' + (config.calendars.length ? ' beside-refresh' : '')}>
           {messages.map((m, i) => <div key={i}>{m}</div>)}
         </div>
       )}

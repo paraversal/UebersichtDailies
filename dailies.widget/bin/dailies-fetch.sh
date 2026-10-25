@@ -1,6 +1,8 @@
 #!/bin/bash
 # Download one calendar feed into the Dailies cache.
-# usage: dailies-fetch.sh <calendar-id> <max-age-minutes>      (feed URL on stdin)
+# usage: dailies-fetch.sh <calendar-id> <max-age-minutes> [force]   (feed URL on stdin)
+#
+# `force` (the refresh button) skips the freshness and back-off checks below.
 #
 # The URL is read from stdin and handed to curl via `-K -`, so the secret token
 # in an iCloud subscription link never shows up in `ps`. A fresh cache is left
@@ -9,9 +11,10 @@
 # replaced atomically, so a reader never sees a half-written file.
 set -u
 
-id="${1:-}"; max_age="${2:-}"
+id="${1:-}"; max_age="${2:-}"; force="${3:-}"
 [[ "$id" =~ ^[a-z0-9_-]+$ ]] || { echo "bad calendar id" >&2; exit 1; }
 [[ "$max_age" =~ ^[0-9]+$ ]] || { echo "bad max age" >&2; exit 1; }
+[ -z "$force" ] || [ "$force" = force ] || { echo "bad option" >&2; exit 1; }
 
 IFS= read -r url || true
 url="${url%$'\r'}"
@@ -26,10 +29,12 @@ mkdir -p "$cache"
 ics="$cache/cal-$id.ics"; err="$cache/cal-$id.err"
 attempt="$cache/cal-$id.attempt"; lock="$cache/.lock-$id"
 
-# Still fresh? Then nothing to do. (A max age of 0 always refreshes.)
-if [ "$max_age" -gt 0 ] && [ -f "$ics" ] && [ -z "$(find "$ics" -mmin +"$max_age" 2>/dev/null)" ]; then exit 0; fi
-# Recently tried and failed? Back off.
-if [ -f "$attempt" ] && [ -z "$(find "$attempt" -mmin +5 2>/dev/null)" ]; then exit 0; fi
+if [ "$force" != force ]; then
+  # Still fresh? Then nothing to do. (A max age of 0 always refreshes.)
+  if [ "$max_age" -gt 0 ] && [ -f "$ics" ] && [ -z "$(find "$ics" -mmin +"$max_age" 2>/dev/null)" ]; then exit 0; fi
+  # Recently tried and failed? Back off.
+  if [ -f "$attempt" ] && [ -z "$(find "$attempt" -mmin +5 2>/dev/null)" ]; then exit 0; fi
+fi
 
 # Several screens run this widget; only one should download at a time.
 if ! mkdir "$lock" 2>/dev/null; then

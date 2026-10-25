@@ -122,9 +122,10 @@ A calendar can also be just the link; its own title is then used as the row labe
 - **Hover** a dot to see that day's events: the title, with the start time in front when it has one. A small number on the dot shows the count when there are several (switch it off with `show_event_count`).
 - **Today's events** are always shown in a small speech bubble above the card (below it for `top_*` locations), pointing at today's column. It steps aside while you hover another dot.
 - Set `n_future` to see what is coming up, for example `7` for the next week.
+- **Refresh now:** hover the card and a small refresh button appears in its top-left corner. Click it to re-download every calendar immediately instead of waiting for the next scheduled refresh; it spins until the feeds are updated. It only exists when you have calendars configured.
 - Colors work like habit colors: automatic and harmonious, or an explicit `"color"`.
 
-**Fetching and caching.** Feeds are downloaded with `curl` in the background and cached in `~/Library/Application Support/Dailies/cache/`, by default every 30 minutes. A failed download keeps the last good copy, is retried at most every 5 minutes, and shows a short note on the card. Your events never leave your machine except through the link you subscribed to.
+**Fetching and caching.** Feeds are downloaded with `curl` in the background and cached in `~/Library/Application Support/Dailies/cache/`, by default every 30 minutes. A failed download keeps the last good copy, is retried at most every 5 minutes (the refresh button ignores that wait), and shows a short note on the card. Your events never leave your machine except through the link you subscribed to.
 
 **What is understood.** Timed and all-day events, multi-day events, time zones, and recurring events: daily, weekly (`BYDAY`, `INTERVAL`), monthly (day of month, or e.g. "second Tuesday", "last Friday"), yearly (birthdays), with `COUNT`, `UNTIL`, excluded dates and moved single occurrences. Cancelled events are skipped. Not supported: `BYSETPOS`, sub-daily repeats, and Windows time zone names (those are read as your local time). The calendar is read-only; nothing is ever written back.
 
