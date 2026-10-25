@@ -2,7 +2,7 @@
 
 A minimalist habit tracker for [Übersicht](https://tracesof.net/uebersicht/).
 
-![](screenshot.png)
+![](docs/showcase.png)
 
 One row per habit, one column per day, a dot in every cell. Click a dot to cycle **empty → done → skipped → empty**. The card sits in a chosen corner of your screen, sizes itself to your habits and the number of days you show, and follows light and dark mode.
 
@@ -21,6 +21,8 @@ cd uebersichtdailies
 cp dailies.widget/config.example.json dailies.widget/config.json
 ln -s "$PWD/dailies.widget" "$HOME/Library/Application Support/Übersicht/widgets/dailies.widget"
 ```
+
+**Or without git:** download [`dailies.widget.zip`](https://github.com/paraversal/uebersichtdailies/raw/main/dailies.widget.zip), unzip it into `~/Library/Application Support/Übersicht/widgets/` and copy `config.example.json` to `config.json` inside the new `dailies.widget` folder.
 
 Then refresh the widgets from the Übersicht menu bar icon. Edit your habits in `dailies.widget/config.json`; Übersicht reloads the widget whenever the file changes.
 
@@ -202,6 +204,22 @@ test/                    core, ics and fetch tests
 ```
 
 The scripts are the only code that touches the disk, and `core.js` has no DOM or Übersicht dependencies, which is what makes it testable. All scripts honour a `DAILIES_DATA_DIR` environment variable, which the tests use to avoid touching your real data.
+
+## Releasing
+
+The repo root holds what the [Übersicht gallery](https://github.com/felixhageloh/uebersicht-widgets#readme) expects: `widget.json`, `dailies.widget.zip` and a hi-res `screenshot.png` (516×320, the gallery's thumbnail; the large image above the install steps lives in `docs/`). The gallery reads the zip from the repo itself, so it is committed to the repo.
+
+`npm run zip` builds that zip from the committed files: one `dailies.widget/` folder plus the license. Your personal `config.json` and stray files like `.DS_Store` can't end up in it. You normally don't run it by hand, because releasing does:
+
+```bash
+npm version minor            # or patch / major: bumps package.json, rebuilds the zip,
+                             # commits both, and creates an annotated tag such as v0.2.0
+git push --follow-tags       # pushes the commit and the tag
+```
+
+The zip is built from the commit you release, so commit all widget changes before running `npm version` (it refuses to run on a dirty tree anyway). If you ever change the widget after a release without releasing again, run `npm run zip` and commit the result, so the gallery doesn't serve an outdated copy.
+
+`--follow-tags` only pushes *annotated* tags (which `npm version` creates) that point at the commits you are pushing; `git push --tags` would push every tag in your clone, including leftovers. For the very first release, `npm version minor` turns the initial `0.0.0` into `0.1.0`.
 
 ## License
 
