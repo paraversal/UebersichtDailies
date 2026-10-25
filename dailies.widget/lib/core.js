@@ -16,6 +16,9 @@ const DEFAULTS = {
   margin: 20,
   day_starts_at: '00:00',
   week_starts: 'monday',
+  n_future: 0,
+  show_event_count: true,
+  calendar_refresh_minutes: 30,
 }
 
 function slugify(name) {
@@ -61,6 +64,20 @@ function normalizeConfig(raw) {
     else errors.push('week_starts must be "monday" or "sunday"')
   }
 
+  if ('n_future' in src) {
+    if (Number.isInteger(src.n_future) && src.n_future >= 0 && src.n_future <= 30) config.n_future = src.n_future
+    else errors.push('n_future must be an integer between 0 and 30')
+  }
+  if ('show_event_count' in src) {
+    if (typeof src.show_event_count === 'boolean') config.show_event_count = src.show_event_count
+    else errors.push('show_event_count must be true or false')
+  }
+  if ('calendar_refresh_minutes' in src) {
+    const m = src.calendar_refresh_minutes
+    if (Number.isInteger(m) && m >= 5 && m <= 1440) config.calendar_refresh_minutes = m
+    else errors.push('calendar_refresh_minutes must be an integer between 5 and 1440')
+  }
+
   const habits = []
   const seen = new Set()
   const list = Array.isArray(src.habits) ? src.habits : []
@@ -88,6 +105,8 @@ function normalizeConfig(raw) {
 
   const hues = assignHues(habits)
   config.habits = habits.map((h) => ({ ...h, hue: hues[h.id] ?? null }))
+
+  config.calendars = normalizeCalendars(src.calendars, errors)
   return { config, errors }
 }
 
@@ -128,6 +147,52 @@ function assignHues(habits) {
   return hues
 }
 
+const CALENDAR_URL_RE = /^(webcals?|https?):\/\/[^\s"'\\]+$/
+
+function shortHash(str) {
+  let h = 2166136261
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return (h >>> 0).toString(16).padStart(8, '0')
+}
+
+// calendars: [ "webcal://…", { "name", "url", "id"?, "color"? } ]. Optional.
+// Without a name the feed's own title is used once it has been downloaded.
+function normalizeCalendars(raw, errors) {
+  if (raw === undefined) return []
+  if (!Array.isArray(raw)) {
+    errors.push('calendars must be a list')
+    return []
+  }
+  const calendars = []
+  const seen = new Set()
+  raw.forEach((entry, i) => {
+    const obj = typeof entry === 'string' ? { url: entry } : entry
+    if (!obj || typeof obj !== 'object' || typeof obj.url !== 'string' || !CALENDAR_URL_RE.test(obj.url.trim())) {
+      errors.push(`calendars[${i}] needs a "url" starting with webcal:// or https://`)
+      return
+    }
+    const url = obj.url.trim()
+    const name = typeof obj.name === 'string' && obj.name.trim() ? obj.name.trim() : null
+    const id = obj.id !== undefined ? obj.id : (name && slugify(name)) || 'cal-' + shortHash(url)
+    if (typeof id !== 'string' || !ID_RE.test(id)) {
+      errors.push(`calendars[${i}] needs an "id" made of a-z, 0-9, - or _`)
+      return
+    }
+    if (seen.has(id)) {
+      errors.push(`calendars[${i}] has a duplicate id "${id}"`)
+      return
+    }
+    seen.add(id)
+    calendars.push({ id, name, url, color: typeof obj.color === 'string' ? obj.color : null })
+  })
+  // Hash with a prefix so a calendar named like a habit doesn't get the same hue.
+  const hues = assignHues(calendars.map((c) => ({ id: 'cal:' + c.id, color: c.color })))
+  return calendars.map((c) => ({ ...c, hue: hues['cal:' + c.id] ?? null }))
+}
+
 const pad = (n) => String(n).padStart(2, '0')
 
 // The "day" a moment belongs to, as a local YYYY-MM-DD key. With
@@ -153,6 +218,20 @@ function lastNDays(todayKey, n) {
     days.push(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`)
   }
   return days
+}
+
+function addDays(key, n) {
+  const d = parseKey(key)
+  d.setDate(d.getDate() + n)
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+// nPast days ending at todayKey (today included) followed by nFuture days.
+function dayRange(todayKey, nPast, nFuture) {
+  const past = lastNDays(todayKey, nPast)
+  const future = []
+  for (let i = 1; i <= nFuture; i++) future.push(addDays(todayKey, i))
+  return past.concat(future)
 }
 
 // 0-6 weekday index of a day key, counted from the configured first day of the week.
@@ -260,6 +339,8 @@ module.exports = {
   assignHues,
   dayKey,
   lastNDays,
+  addDays,
+  dayRange,
   weekdayIndex,
   replayLog,
   parseReadOutput,

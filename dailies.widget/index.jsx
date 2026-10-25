@@ -1,5 +1,7 @@
 import { React, run } from 'uebersicht'
 import core from './lib/core.js'
+import ics from './lib/ics.js'
+import sync from './lib/calendar-sync.js'
 
 // Übersicht runs commands with the *widgets root* as cwd, so find our bin/ folder
 // by the script's own name. That works whatever the widget folder or symlink is called.
@@ -20,6 +22,25 @@ export const className = `
   pointer-events: none;
 `
 
+// Calendar feeds are downloaded and cached outside the 5s poll (see lib/calendar-sync.js).
+// The config is read once here; editing it reloads the widget, which runs init again.
+export const init = (dispatch) => {
+  if (window.__dailiesStopSync) window.__dailiesStopSync()
+  run(command)
+    .then((output) => {
+      const { config } = core.parseReadOutput(output)
+      if (!config.calendars.length) return
+      window.__dailiesStopSync = sync.startCalendarSync({
+        run,
+        dispatch,
+        locate: LOCATE,
+        calendars: config.calendars,
+        refreshMinutes: config.calendar_refresh_minutes,
+      })
+    })
+    .catch(() => {})
+}
+
 const initial = core.normalizeConfig({ habits: [] })
 
 export const initialState = {
@@ -30,6 +51,8 @@ export const initialState = {
   pop: null,
   loaded: false,
   fetchError: null,
+  calendarData: {},
+  calendarVersion: 0,
 }
 
 export const updateState = (event, prev) => {
@@ -48,9 +71,26 @@ export const updateState = (event, prev) => {
         pop: event.value === core.DONE ? key : null,
       }
     }
+    case 'DAILIES/CALENDARS':
+      return { ...prev, calendarData: ics.parseCalendarOutput(event.output), calendarVersion: prev.calendarVersion + 1 }
     default:
       return prev
   }
+}
+
+// Expanding recurring events is the costly part; redo it only when the feeds
+// or the visible window change, not on every 5s refresh.
+let memo = { key: null, value: null }
+const eventsByCalendar = (state, from, to) => {
+  const key = `${state.calendarVersion}|${from}|${to}`
+  if (memo.key === key) return memo.value
+  const value = {}
+  for (const c of state.config.calendars) {
+    const data = state.calendarData[c.id]
+    value[c.id] = data ? ics.expandEvents(data.events, from, to) : {}
+  }
+  memo = { key, value }
+  return value
 }
 
 // Indexed by core.weekdayIndex, so the letters follow config.week_starts.
@@ -60,6 +100,7 @@ const WEEKDAY_LETTERS = {
 }
 const WEEK_GAP = 8
 const CELL = 26
+const BUBBLE_MAX_LINES = 6
 
 const anchor = ({ location, margin }) => {
   const [v, h] = location.split('_')
@@ -73,8 +114,9 @@ const css = `
   --empty: rgba(255,255,255,.14);
   --skip: rgba(255,255,255,.34);
   --bg: rgba(28,28,32,.55);
+  --tip-bg: rgba(38,38,44,.92);
   --edge: rgba(255,255,255,.10);
-  --l: .80; /* shared lightness + chroma for auto habit colors */
+  --l: .80; /* shared lightness + chroma for auto habit and calendar colors */
   --chroma: .13;
   font: 12px/1.2 -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
   color: var(--fg);
@@ -97,23 +139,27 @@ const css = `
     --empty: rgba(0,0,0,.10);
     --skip: rgba(0,0,0,.28);
     --bg: rgba(255,255,255,.60);
+    --tip-bg: rgba(255,255,255,.94);
     --edge: rgba(0,0,0,.08);
     --l: .68;
   }
 }
-.dailies-grid { display: grid; align-items: center; }
+.dailies-grid { display: grid; align-items: center; position: relative; }
 .dailies-label {
   padding-right: 14px; max-width: 170px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.dailies-label.cal { color: var(--muted); }
 .dailies-head { text-align: center; color: var(--muted); font-size: 10px; line-height: 1.25; padding-bottom: 4px; }
 .dailies-head b { display: block; font-weight: 600; font-size: 11px; }
 .dailies-head.today { color: var(--fg); }
 .dailies-head.week { padding-left: ${WEEK_GAP}px; }
-.dailies-cell.week { justify-self: end; }
+.dailies-cell.week, .dailies-cal-cell.week { justify-self: end; }
 .dailies-streak { padding-left: 10px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.dailies-sep { grid-column: 1 / -1; height: 1px; margin: 6px 0; background: var(--edge); }
+
+.dailies-cell, .dailies-cal-cell, .dailies-line { --c: oklch(var(--l) var(--chroma) var(--h, 160)); }
 .dailies-cell {
-  --c: oklch(var(--l) var(--chroma) var(--h, 160));
   all: unset; box-sizing: border-box; width: ${CELL}px; height: ${CELL}px;
   display: grid; place-items: center; cursor: pointer;
 }
@@ -133,23 +179,86 @@ const css = `
   animation: dailies-ring .6s ease-out forwards;
 }
 .dailies-cell { position: relative; }
+.dailies-cell.future { cursor: default; pointer-events: none; }
+.dailies-cell.future .dailies-dot { opacity: .45; transform: scale(.8); }
+
+/* calendar rows: a smaller dot than the habit dots, so the two kinds never look alike */
+.dailies-cal-cell {
+  position: relative; box-sizing: border-box; width: ${CELL}px; height: ${CELL}px;
+  display: grid; place-items: center;
+}
+.dailies-cal-cell:hover { z-index: 20; }
+.dailies-evdot { width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
+.dailies-cal-cell.past .dailies-evdot { opacity: .5; }
+.dailies-count {
+  position: absolute; top: 1px; right: 2px;
+  font-size: 8px; font-weight: 600; line-height: 1; color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* tooltip on hover */
+.dailies-tip, .dailies-bubble {
+  position: absolute; width: max-content; max-width: 240px; box-sizing: border-box;
+  padding: 6px 9px; border-radius: 10px; font-size: 11px; line-height: 1.3;
+  background: var(--tip-bg); border: 1px solid var(--edge);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 6px 20px rgba(0,0,0,.28);
+  pointer-events: none; text-align: left;
+}
+.dailies-tip { z-index: 30; opacity: 0; transition: opacity .12s ease; }
+.dailies-cal-cell:hover .dailies-tip { opacity: 1; }
+.dailies-tip.up { bottom: calc(100% + 2px); }
+.dailies-tip.down { top: calc(100% + 2px); }
+.dailies-tip.l, .dailies-bubble.l { left: 0; }
+.dailies-tip.r, .dailies-bubble.r { right: 0; }
+.dailies-line { display: flex; gap: 6px; align-items: baseline; }
+.dailies-line + .dailies-line { margin-top: 3px; }
+.dailies-line i { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--c); transform: translateY(-1px); }
+.dailies-line em { font-style: normal; color: var(--muted); font-variant-numeric: tabular-nums; }
+.dailies-line span { overflow-wrap: anywhere; }
+
+/* speech bubble for today's events, outside the card, with a tail pointing at today's column */
+.dailies-bubble { z-index: 5; animation: dailies-fade .3s ease backwards; }
+.dailies-bubble.up { bottom: calc(100% + 24px); }
+.dailies-bubble.down { top: calc(100% + 24px); }
+.dailies-bubble::after {
+  content: ''; position: absolute; width: 8px; height: 8px;
+  background: var(--tip-bg); border: 1px solid var(--edge); transform: rotate(45deg);
+}
+.dailies-bubble.up::after { bottom: -5px; border-top: 0; border-left: 0; }
+.dailies-bubble.down::after { top: -5px; border-bottom: 0; border-right: 0; }
+.dailies-bubble.l::after { left: 9px; }
+.dailies-bubble.r::after { right: 9px; }
+.dailies-grid:has(.dailies-cal-cell:hover) .dailies-bubble { opacity: 0; transition: opacity .1s; }
+.dailies-more { color: var(--muted); margin-top: 3px; }
+
 @keyframes dailies-pop { 0% { transform: scale(.6); } 60% { transform: scale(1.35); } 100% { transform: scale(1); } }
 @keyframes dailies-ring { from { transform: scale(1); opacity: .8; } to { transform: scale(2.4); opacity: 0; } }
+@keyframes dailies-fade { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) {
-  .dailies-dot { transition: none; }
-  .dailies-cell.s1.pop .dailies-dot, .dailies-cell.s1.pop::after { animation: none; }
+  .dailies-dot, .dailies-tip { transition: none; }
+  .dailies-cell.s1.pop .dailies-dot, .dailies-cell.s1.pop::after, .dailies-bubble { animation: none; }
 }
 .dailies-errors { color: #ff8a80; font-size: 11px; max-width: 320px; margin-bottom: 8px; }
 .dailies-errors div + div { margin-top: 3px; }
 `
 
+const colorStyle = (item) => (item.color ? { '--c': item.color } : { '--h': item.hue })
+
 export const render = (state, dispatch) => {
-  const { config, errors, values, pending, pop, loaded, fetchError } = state
+  const { config, errors, values, pending, pop, loaded, fetchError, calendarData } = state
   const now = new Date()
   const today = core.dayKey(now, config.day_starts_at)
-  const days = core.lastNDays(today, config.n_col)
+  const days = core.dayRange(today, config.n_col, config.n_future)
+  const todayIdx = config.n_col - 1
+  const up = config.location.startsWith('bottom') // tooltips open away from the screen edge
+  const vertical = up ? 'up' : 'down'
 
-  const messages = fetchError ? [fetchError, ...errors] : errors
+  const calEvents = config.calendars.length ? eventsByCalendar(state, days[0], days[days.length - 1]) : {}
+  const calErrors = config.calendars
+    .filter((c) => calendarData[c.id] && calendarData[c.id].error)
+    .map((c) => `calendar "${c.name || calendarData[c.id].name || c.id}": ${calendarData[c.id].error}`)
+  const messages = [...(fetchError ? [fetchError] : []), ...errors, ...calErrors]
 
   const tap = (habit, date) => {
     const value = core.nextValue(core.effectiveValue(values, pending, habit.id, date))
@@ -163,6 +272,26 @@ export const render = (state, dispatch) => {
   const grid = {
     gridTemplateColumns: `auto ${days.map((d, i) => (weekStart(d, i) ? CELL + WEEK_GAP : CELL) + 'px').join(' ')} auto`,
   }
+  // Tooltips grow toward the middle of the card so they don't run off its edge.
+  const side = (i) => (i + 1 > days.length / 2 ? 'r' : 'l')
+
+  const calLabel = (c) => c.name || (calendarData[c.id] && calendarData[c.id].name) || ''
+  const rowCount = 1 + config.calendars.length + (config.calendars.length ? 1 : 0) + config.habits.length
+
+  const todaysEvents = config.calendars
+    .map((c) => ({ c, items: (calEvents[c.id] && calEvents[c.id][today]) || [] }))
+    .filter((g) => g.items.length)
+  const bubbleLines = todaysEvents.flatMap(({ c, items }) => items.map((e) => ({ c, e })))
+
+  const eventLine = (c, e, key) => (
+    <div className="dailies-line" key={key} style={colorStyle(c)}>
+      <i />
+      <span>
+        {e.time && <em>{e.time} </em>}
+        {e.title}
+      </span>
+    </div>
+  )
 
   return (
     <div className="dailies-card" style={anchor(config)}>
@@ -186,17 +315,49 @@ export const render = (state, dispatch) => {
             )
           })}
           <div />
+
+          {config.calendars.map((c) => [
+            <div key={c.id + ':label'} className="dailies-label cal" title={calLabel(c)}>{calLabel(c)}</div>,
+            ...days.map((d, i) => {
+              const events = (calEvents[c.id] && calEvents[c.id][d]) || []
+              const cls = 'dailies-cal-cell' + (d < today ? ' past' : '') + (weekStart(d, i) ? ' week' : '')
+              return (
+                <div key={c.id + ':' + d} className={cls} style={colorStyle(c)}>
+                  {events.length > 0 && [
+                    <span key="dot" className="dailies-evdot" />,
+                    config.show_event_count && events.length > 1 && (
+                      <span key="count" className="dailies-count">{events.length}</span>
+                    ),
+                    <div key="tip" className={`dailies-tip ${vertical} ${side(i)}`}>
+                      {events.map((e, k) => eventLine(c, e, k))}
+                    </div>,
+                  ]}
+                </div>
+              )
+            }),
+            <div key={c.id + ':end'} />,
+          ])}
+          {config.calendars.length > 0 && <div className="dailies-sep" />}
+
           {config.habits.map((habit) => [
             <div key={habit.id + ':label'} className="dailies-label" title={habit.name}>{habit.name}</div>,
             ...days.map((d, i) => {
+              const week = weekStart(d, i) ? ' week' : ''
+              if (d > today) {
+                return (
+                  <div key={habit.id + '|' + d} className={'dailies-cell future' + week} style={colorStyle(habit)}>
+                    <span className="dailies-dot" />
+                  </div>
+                )
+              }
               const v = core.effectiveValue(values, pending, habit.id, d)
               const key = core.cellKey(habit.id, d)
-              const cls = `dailies-cell s${v}` + (config.show_success_animation && pop === key ? ' pop' : '') + (weekStart(d, i) ? ' week' : '')
+              const cls = `dailies-cell s${v}` + (config.show_success_animation && pop === key ? ' pop' : '') + week
               return (
                 <button
                   key={key}
                   className={cls}
-                  style={habit.color ? { '--c': habit.color } : { '--h': habit.hue }}
+                  style={colorStyle(habit)}
                   onClick={() => tap(habit, d)}
                   aria-label={`${habit.name}, ${d}`}
                 >
@@ -211,6 +372,19 @@ export const render = (state, dispatch) => {
               })()}
             </div>,
           ])}
+
+          {bubbleLines.length > 0 && (
+            <div
+              className={`dailies-bubble ${vertical} ${side(todayIdx)}`}
+              // an explicit end line makes the column itself the containing block ("auto" would mean the whole grid)
+              style={{ gridColumn: `${todayIdx + 2} / span 1`, gridRow: `1 / span ${rowCount}` }}
+            >
+              {bubbleLines.slice(0, BUBBLE_MAX_LINES).map(({ c, e }, k) => eventLine(c, e, k))}
+              {bubbleLines.length > BUBBLE_MAX_LINES && (
+                <div className="dailies-more">+{bubbleLines.length - BUBBLE_MAX_LINES} more</div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

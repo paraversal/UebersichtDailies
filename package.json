@@ -1,0 +1,9 @@
+{
+    "name": "uebersichtdailies",
+    "private": true,
+    "description": "Übersicht widget for tracking daily habits next to your calendars",
+    "license": "GPL-3.0-only",
+    "scripts": {
+        "test": "node --test test/*.test.js"
+    }
+}

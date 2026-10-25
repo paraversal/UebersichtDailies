@@ -1,5 +1,6 @@
 {
     "n_col": 14,
+    "n_future": 0,
     "show_success_animation": true,
     "location": "bottom_left",
     "margin": 20,
@@ -8,5 +9,6 @@
     "habits": [
         "go to sleep on time",
         { "id": "read", "name": "read 20 pages", "color": "#7aa2f7" }
-    ]
+    ],
+    "calendars": []
 }

@@ -143,3 +143,56 @@ test('dailies-log.sh appends valid events and rejects bad input; read.sh round-t
   assert.equal(parsed.values['go-to-sleep']['2026-10-25'], 2)
   fs.rmSync(dir, { recursive: true })
 })
+
+test('n_future, show_event_count and calendar_refresh_minutes validate with defaults', () => {
+  const ok = core.normalizeConfig({ habits: ['a'] }).config
+  assert.equal(ok.n_future, 0)
+  assert.equal(ok.show_event_count, true)
+  assert.equal(ok.calendar_refresh_minutes, 30)
+  assert.deepEqual(ok.calendars, [])
+
+  const set = core.normalizeConfig({ habits: ['a'], n_future: 7, show_event_count: false, calendar_refresh_minutes: 60 })
+  assert.deepEqual(set.errors, [])
+  assert.equal(set.config.n_future, 7)
+  assert.equal(set.config.show_event_count, false)
+
+  const bad = core.normalizeConfig({ habits: ['a'], n_future: -1, show_event_count: 'yes', calendar_refresh_minutes: 1 })
+  assert.equal(bad.errors.length, 3)
+  assert.equal(bad.config.n_future, 0)
+})
+
+test('calendars: strings or objects, ids, hues, and errors that never echo the url', () => {
+  const secret = 'https://p01-caldav.icloud.com/published/2/SECRET-TOKEN'
+  const { config, errors } = core.normalizeConfig({
+    habits: ['a'],
+    calendars: [
+      'webcal://p01-caldav.icloud.com/published/2/abc',
+      { name: 'Work', url: secret },
+      { name: 'Home', url: 'https://x.test/h.ics', color: '#fff' },
+    ],
+  })
+  assert.deepEqual(errors, [])
+  const [bare, work, home] = config.calendars
+  assert.match(bare.id, /^cal-[0-9a-f]{8}$/)
+  assert.equal(bare.name, null) // taken from the feed once downloaded
+  assert.equal(work.id, 'work')
+  assert.ok(Number.isInteger(work.hue) && work.hue !== bare.hue)
+  assert.equal(home.hue, null)
+  assert.equal(home.color, '#fff')
+  // stable ids across runs
+  assert.equal(core.normalizeConfig({ habits: ['a'], calendars: ['webcal://p01-caldav.icloud.com/published/2/abc'] }).config.calendars[0].id, bare.id)
+
+  const broken = core.normalizeConfig({
+    habits: ['a'],
+    calendars: [{ name: 'x', url: 'ftp://nope' }, { name: 'y', url: secret + ' with space' }, { name: 'Work', url: secret }, { name: 'work', url: secret }, 7],
+  })
+  assert.equal(broken.errors.length, 4)
+  assert.ok(!broken.errors.join('\n').includes('SECRET-TOKEN'), 'error messages must not leak the secret link')
+  assert.equal(core.normalizeConfig({ habits: ['a'], calendars: 'nope' }).errors.length, 1)
+})
+
+test('dayRange appends future days after today', () => {
+  assert.deepEqual(core.dayRange('2026-10-30', 3, 3), ['2026-10-28', '2026-10-29', '2026-10-30', '2026-10-31', '2026-11-01', '2026-11-02'])
+  assert.deepEqual(core.dayRange('2026-10-30', 2, 0), ['2026-10-29', '2026-10-30'])
+  assert.equal(core.addDays('2026-12-31', 1), '2027-01-01')
+})
