@@ -208,8 +208,9 @@ const css = `
 
 /* refresh button: only there while the card is hovered (or while refreshing) */
 .dailies-refresh {
-  all: unset; box-sizing: border-box; position: absolute; top: 5px; left: 6px;
-  width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center;
+  /* z-index: the grid comes later and would otherwise paint (and take clicks) over the lower half */
+  all: unset; box-sizing: border-box; position: absolute; z-index: 25; top: 3px; left: 4px;
+  width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center;
   color: var(--muted); cursor: pointer; opacity: 0;
   transition: opacity .2s ease, background-color .15s ease, color .15s ease;
 }
