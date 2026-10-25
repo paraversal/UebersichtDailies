@@ -2,6 +2,7 @@
     "n_col": 14,
     "n_future": 0,
     "show_success_animation": true,
+    "highlight_today": true,
     "location": "bottom_left",
     "margin": 20,
     "day_starts_at": "00:00",

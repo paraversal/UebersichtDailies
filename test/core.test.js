@@ -196,3 +196,13 @@ test('dayRange appends future days after today', () => {
   assert.deepEqual(core.dayRange('2026-10-30', 2, 0), ['2026-10-29', '2026-10-30'])
   assert.equal(core.addDays('2026-12-31', 1), '2027-01-01')
 })
+
+test('highlight_today defaults on and validates as a boolean', () => {
+  assert.equal(core.normalizeConfig({ habits: ['a'] }).config.highlight_today, true)
+  const off = core.normalizeConfig({ habits: ['a'], highlight_today: false })
+  assert.deepEqual(off.errors, [])
+  assert.equal(off.config.highlight_today, false)
+  const bad = core.normalizeConfig({ habits: ['a'], highlight_today: 'yes' })
+  assert.equal(bad.errors.length, 1)
+  assert.equal(bad.config.highlight_today, true)
+})

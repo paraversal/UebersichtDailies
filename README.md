@@ -45,6 +45,7 @@ Today is the rightmost column, unless you set `n_future` to also show upcoming d
     "n_col": 14,
     "n_future": 7,
     "show_success_animation": true,
+    "highlight_today": true,
     "location": "bottom_left",
     "margin": 20,
     "day_starts_at": "00:00",
@@ -63,6 +64,7 @@ Today is the rightmost column, unless you set `n_future` to also show upcoming d
 |---|---|---|
 | `n_col` | `14` | Days shown up to and including today, 1–60. Older data is kept, just not displayed. |
 | `n_future` | `0` | Extra days shown after today, 0–30. They show calendar events; habit dots there are greyed out and can't be tapped. |
+| `highlight_today` | `true` | A soft pill behind today's column, from the date down to your last habit, so you can find today at a glance. It follows light and dark mode. Set `false` for a plain grid. |
 | `show_success_animation` | `true` | Pop and ring when a dot becomes done. Also turned off by the system "reduce motion" setting. |
 | `location` | `"bottom_left"` | `top_left`, `top_right`, `bottom_left` or `bottom_right`. |
 | `margin` | `20` | Distance from the screen edge, in px. |

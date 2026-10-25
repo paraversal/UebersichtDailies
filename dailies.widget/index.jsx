@@ -127,6 +127,8 @@ const css = `
   --bg: rgba(28,28,32,.55);
   --tip-bg: rgba(38,38,44,.92);
   --edge: rgba(255,255,255,.10);
+  --today-bg: rgba(255,255,255,.075);
+  --today-edge: rgba(255,255,255,.07);
   --l: .80; /* shared lightness + chroma for auto habit and calendar colors */
   --chroma: .13;
   font: 12px/1.2 -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
@@ -152,6 +154,8 @@ const css = `
     --bg: rgba(255,255,255,.60);
     --tip-bg: rgba(255,255,255,.94);
     --edge: rgba(0,0,0,.08);
+    --today-bg: rgba(0,0,0,.055);
+    --today-edge: rgba(0,0,0,.05);
     --l: .68;
   }
 }
@@ -192,6 +196,15 @@ const css = `
 .dailies-cell { position: relative; }
 .dailies-cell.future { cursor: default; pointer-events: none; }
 .dailies-cell.future .dailies-dot { opacity: .45; transform: scale(.8); }
+
+/* soft pill behind today's column, from the date header down to the last habit */
+.dailies-today {
+  position: absolute; z-index: -1; pointer-events: none;
+  top: -3px; bottom: -3px; left: 1px; right: 1px; border-radius: ${CELL / 2}px;
+  background: var(--today-bg); box-shadow: inset 0 0 0 1px var(--today-edge);
+  animation: dailies-fade .4s ease backwards;
+}
+.dailies-today.week { left: ${WEEK_GAP + 1}px; }
 
 /* refresh button: only there while the card is hovered (or while refreshing) */
 .dailies-refresh {
@@ -283,6 +296,7 @@ const css = `
   .dailies-dot, .dailies-tip { transition: none; }
   .dailies-cell.s1.pop .dailies-dot, .dailies-cell.s1.pop::after, .dailies-bubble { animation: none; }
   .dailies-refresh.busy svg { animation: none; }
+  .dailies-today { animation: none; }
   .dailies-refresh.busy { color: var(--fg); }
 }
 .dailies-errors { color: #ff8a80; font-size: 11px; max-width: 320px; margin-bottom: 8px; }
@@ -399,6 +413,13 @@ export const render = (state, dispatch) => {
       {!loaded && messages.length === 0 && <div className="dailies-streak">loading…</div>}
       {config.habits.length > 0 && (
         <div className="dailies-grid" style={grid}>
+          {config.highlight_today && (
+            // first in the grid and behind the content (z-index -1); an explicit end line makes it exactly today's column
+            <div
+              className={'dailies-today' + (weekStart(today, todayIdx) ? ' week' : '')}
+              style={{ gridColumn: `${todayIdx + 2} / span 1`, gridRow: `1 / span ${rowCount}` }}
+            />
+          )}
           <div />
           {days.map((d, i) => {
             const dt = new Date(d + 'T12:00:00')

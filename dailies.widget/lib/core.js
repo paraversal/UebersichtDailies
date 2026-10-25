@@ -19,6 +19,7 @@ const DEFAULTS = {
   n_future: 0,
   show_event_count: true,
   calendar_refresh_minutes: 30,
+  highlight_today: true,
 }
 
 function slugify(name) {
@@ -71,6 +72,10 @@ function normalizeConfig(raw) {
   if ('show_event_count' in src) {
     if (typeof src.show_event_count === 'boolean') config.show_event_count = src.show_event_count
     else errors.push('show_event_count must be true or false')
+  }
+  if ('highlight_today' in src) {
+    if (typeof src.highlight_today === 'boolean') config.highlight_today = src.highlight_today
+    else errors.push('highlight_today must be true or false')
   }
   if ('calendar_refresh_minutes' in src) {
     const m = src.calendar_refresh_minutes
